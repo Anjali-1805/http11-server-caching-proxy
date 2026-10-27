@@ -6,8 +6,8 @@
 *.exe
 
 # Build outputs
-server
-proxy
+/server
+/proxy
 build/
 bin/
 
