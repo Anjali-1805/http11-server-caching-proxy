@@ -1,0 +1,26 @@
+# Compiled files
+*.o
+*.a
+*.so
+*.out
+*.exe
+
+# Build outputs
+/server
+/http_server
+/socket_learning
+/proxy
+build/
+bin/
+
+# Editors
+.vscode/
+.idea/
+
+# Temporary files and logs
+*.tmp
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
