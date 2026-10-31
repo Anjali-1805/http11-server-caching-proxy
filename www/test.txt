@@ -1,0 +1,3 @@
+Hello from Anjali's HTTP/1.1 Static File Server!
+This is a plain text file test.
+Testing Content-Type text/plain and Content-Length.

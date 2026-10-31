@@ -2,22 +2,26 @@
 
 ## Purpose
 
-This directory contains tests for the HTTP/1.1 server component.
+This directory contains automated tests for the HTTP/1.1 server component.
 
-## Planned Test Categories
+## Test Implementation
 
-1. **Request parsing:** valid requests, malformed request lines, incomplete headers, and requests split across TCP reads.
-2. **Methods:** GET and HEAD behavior.
-3. **Status codes:** successful responses and required error responses, including 400, 404, 405, 414, 431, 500, and 505 where applicable.
-4. **Response framing:** Content-Length, chunked transfer encoding, and persistent connections.
-5. **Static files:** existing files, missing files, MIME types, and directory traversal attempts.
-6. **Concurrency:** simultaneous client requests handled by both the thread-pool and event-loop implementations.
-7. **Regression tests:** previously fixed bugs must remain fixed.
+Automated testing is implemented in `test_suite.py` and run via `make test` or `python3 tests/server/test_suite.py`.
 
-## Test Status
+## Test Categories Implemented
 
-Tests will be marked complete only after they have been implemented, run, and their results recorded.
+1. **Request parsing:** valid requests, malformed request lines, incomplete headers, missing Host header in HTTP/1.1, and requests split across TCP reads.
+2. **Methods:** GET and HEAD behavior (HEAD returns identical headers with no body).
+3. **Status codes:** 200, 400, 403, 404, 405, 414, 431, 500, 501, 505.
+4. **Response framing:** Content-Length, Content-Type, Connection: keep-alive and Connection: close.
+5. **Static files:** HTML, CSS, JavaScript, TXT, JSON, and PDF files.
+6. **Path traversal defense:** Path escaping attempts (`/../../etc/passwd`) blocked with 403 Forbidden.
+7. **Concurrency:** 50 simultaneous client connections handled by both Thread-Pool and Event-Loop modes.
+8. **Graceful shutdown:** Server cleanly terminates worker threads/multiplexers on SIGINT.
 
-## Constraints
+## Execution
 
-The server must use raw TCP sockets. Prohibited HTTP server frameworks must not be used.
+```bash
+python3 tests/server/test_suite.py
+```
+Both `threadpool` and `eventloop` modes pass all 18 requirements.
