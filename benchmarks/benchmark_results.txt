@@ -1,0 +1,14 @@
+HTTP/1.1 Server Benchmark Results
+================================================================
+Metric                         | Thread-Pool (8 threads) | Event-Loop (poll)
+----------------------------------------------------------------
+Total Requests                 | 1000             | 1000            
+Successful Requests            | 1000             | 1000            
+Failed Requests                | 0                | 0               
+Test Duration (s)              | 0.640            | 2.398           
+Requests Per Second (RPS)      | 1561.88          | 417.08          
+Average Latency (ms)           | 22.95            | 93.94           
+P50 Latency (ms)               | 23.02            | 93.98           
+P95 Latency (ms)               | 34.46            | 124.08          
+P99 Latency (ms)               | 40.05            | 140.20          
+================================================================
