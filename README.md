@@ -14,10 +14,12 @@ This project aims to implement an HTTP/1.1 server and a forward proxy with an LR
 - Event-loop concurrency
 - Server testing and benchmarks
 
-### Sipra & Akshat — Forward Proxy and Caching
+### Akshat — Forward Proxy and Initial Caching
 - Upstream TCP connections and HTTP forwarding
 - LRU cache implementation
 - Cache-Control handling
+
+### Sipra — Forward Proxy Validation and Testing
 - ETag and Last-Modified validation
 - Conditional GET and cache revalidation
 - Proxy testing and benchmarks
@@ -39,8 +41,9 @@ This project aims to implement an HTTP/1.1 server and a forward proxy with an LR
 - Version control: Git and GitHub
 
 ## Project Status
-- **HTTP Server**: Complete and verified (both Thread-Pool and Event-Loop concurrency models fully implemented and tested).
-- **Forward Proxy and Cache**: Complete and verified (LRU caching, Cache-Control handling, conditional revalidation, and multithreading implemented and tested on `feature/proxy-cache`).
+- **HTTP Server (Anjali)**: Complete and verified (both Thread-Pool and Event-Loop concurrency models fully implemented and tested).
+- **Forward Proxy and Initial Caching (Akshat)**: Complete and verified (LRU caching, Cache-Control handling, upstream forwarding, and multithreading implemented and tested on `feature/proxy-cache`).
+- **Proxy Validation, Revalidation & Testing (Sipra)**: Complete and verified (ETag and Last-Modified validation, conditional GET revalidation, 15/15 automated tests passed, and native C benchmarks on `feature/sipra-cache-validation`).
 
 ## AI Use
 AI assistance is documented in `AI-USE.md` in accordance with the assignment rules.
@@ -269,7 +272,7 @@ python3 benchmarks/benchmark.py
 
 ---
 
-### Sipra & Akshat — Forward Proxy and Cache Implementation
+### Akshat — Forward Proxy and Initial Caching Implementation
 
 #### 1. Features Implemented
 
