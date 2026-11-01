@@ -14,7 +14,7 @@ This project aims to implement an HTTP/1.1 server and a forward proxy with an LR
 - Event-loop concurrency
 - Server testing and benchmarks
 
-### Sipra — Forward Proxy and Caching
+### Sipra & Akshat — Forward Proxy and Caching
 - Upstream TCP connections and HTTP forwarding
 - LRU cache implementation
 - Cache-Control handling
