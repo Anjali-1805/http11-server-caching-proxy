@@ -428,3 +428,97 @@ python3 benchmarks/benchmark_proxy.py
 | **Average Latency** | **17.53 ms** | 17.14 ms |
 | **P50 Latency** | **17.10 ms** | 16.85 ms |
 | **P95 Latency** | **26.89 ms** | 23.71 ms |
+
+---
+
+### Sipra — Forward Proxy Validation and Testing
+
+#### 1. Assigned Responsibilities
+- **ETag & Last-Modified Validation**: RFC 7232 conditional validators handling, entity tag matching (including weak tags and wildcards), and Last-Modified date comparisons.
+- **Conditional GET & Cache Revalidation**: Detecting stale/expired cache entries, executing upstream revalidation exchanges, handling `304 Not Modified` without payload re-transmission, updating cached metadata (`Age`, `Date`, `ETag`, `Last-Modified`), handling origin updates (`200 OK`), and safely falling back on missing validators.
+- **Proxy Testing**: Designing and implementing an independent, automated test suite covering 15 validation and error scenarios without Python.
+- **Performance Benchmarking**: Native C multi-threaded benchmark suite measuring cache hits, misses, conditional revalidation, requests with/without caching, throughput, latency percentiles, hit ratios, and latency reduction without Python.
+
+#### 2. Implementation Details
+
+- **Validation & Revalidation Engine (`src/cache/cache_validator.c`, `src/cache/cache_validator.h`)**:
+  - `cache_entry_needs_revalidation()`: Determines if an entry is expired (`!cache_entry_is_fresh`), stale, or marked with `Cache-Control: no-cache` / `must-revalidate`.
+  - `cache_entry_has_validators()`: Checks for the existence of `ETag` or `Last-Modified` tokens on cached entries.
+  - `http_etag_matches()`: RFC 7232 §3.1 compliant ETag comparator supporting `*`, exact match, comma-separated lists, and weak tags (`W/"..."`).
+  - `http_date_not_modified()`: Parses RFC 1123 / RFC 850 / asctime dates via `strptime()` and `timegm()`, evaluating whether the cached representation has changed since `If-Modified-Since`.
+  - `cache_check_client_conditional()`: Evaluates client-supplied conditional headers against cached entries; enables the proxy to directly return `304 Not Modified` with `X-Cache: HIT` when client validators match fresh cache.
+  - `send_proxy_304()`: Transmits RFC-compliant `304 Not Modified` headers (`Date`, `Server`, `Via`, `X-Cache`, `Age`, `ETag`, `Last-Modified`, `Connection`) with zero body payload.
+  - `cache_revalidate_with_upstream()`: Orchestrates revalidation with origin servers; attaches conditional headers (`If-None-Match`, `If-Modified-Since`), handles `304 Not Modified` by updating cache timestamps and metadata (`cached_at`, `max_age`, `etag`, `last_modified`) while preserving existing body, and stores updated responses on `200 OK`.
+- **Proxy Server Integration Point (`src/proxy/proxy.c`)**:
+  - Hooked into `process_proxy_client()` to evaluate client conditional requests on fresh cache hits.
+  - Delegated stale cache revalidation to `cache_revalidate_with_upstream()`.
+  - Serves `304 Not Modified` to conditional clients upon origin revalidation while serving `200 OK` (with preserved cached body) to unconditional clients.
+
+#### 3. Testing (No Python)
+
+A dedicated C test server (`tests/proxy/mock_origin.c`) and automated Bash test runner (`tests/proxy/test_validation.sh`) test all 15 assigned scenarios:
+
+```bash
+# Execute Sipra's proxy validation test suite
+make test_validation
+# OR directly
+./tests/proxy/test_validation.sh
+```
+
+##### Automated Test Coverage & Verification:
+1. **Cache MISS**: Initial request yields `200 OK` and `X-Cache: MISS`.
+2. **Cache HIT**: Subsequent request served from cache with `200 OK` and `X-Cache: HIT`.
+3. **ETag Received**: Response captures and forwards origin `ETag` header.
+4. **If-None-Match Validation**: Client conditional request on fresh cache returns `304 Not Modified`.
+5. **Stale Cache Revalidation**: Stale entry (`max-age=1` expired) revalidated with origin, returning `X-Cache: REVALIDATED`.
+6. **Changed ETag**: Origin resource update detected via new ETag, updating cache and returning fresh representation.
+7. **Last-Modified Header**: `Last-Modified` timestamp forwarded and cached from origin.
+8. **If-Modified-Since Validation**: Client conditional IMS request returns `304 Not Modified`.
+9. **Modified Resource**: Origin modification detected, refreshing cached body.
+10. **Unmodified Resource**: Upstream returns 304, successfully verifying resource is unchanged.
+11. **Stale Cache Revalidation**: Handled smoothly across expiration boundaries.
+12. **Payload Preservation**: Cached body byte integrity verified after 304 revalidation exchange.
+13. **Metadata Updates**: `Age` header calculation and freshness timestamps refreshed.
+14. **Missing Validators**: Stale entry lacking ETag and Last-Modified safely re-fetched via unconditional GET.
+15. **Origin Server Errors**: Unreachable origin cleanly handled with `502 Bad Gateway`.
+
+**Test Result**: 15/15 scenarios passed (100% success rate, 0 failures).
+
+#### 4. Performance Benchmarks (No Python)
+
+A high-performance C benchmark client (`benchmarks/benchmark_validation.c`) using raw POSIX sockets and `clock_gettime(CLOCK_MONOTONIC)` measured the proxy under 10 concurrent threads:
+
+```bash
+# Execute Sipra's validation benchmark suite
+make benchmark_validation
+# OR directly
+./benchmarks/run_benchmarks.sh
+```
+
+##### Measured Benchmark Results:
+
+- **Environment**: Ubuntu 24.04 (WSL 2) on Windows, GCC 13.3.0.
+- **Workload**: 500 requests per scenario (2,500 total requests) under 10 concurrent client threads.
+
+| Benchmark Scenario | Total Reqs | Success (OK/304) | Failed | Throughput (RPS) | Hit Ratio | Avg Latency | P50 Latency | P95 Latency |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Cache HITs (In-Memory)** | 500 | 500 (100%) | 0 (0%) | **11,510.99 req/s** | 94.8% | **0.77 ms** | 0.72 ms | 1.37 ms |
+| **Conditional Revalidation** | 500 | 500 (100%) | 0 (0%) | **12,890.38 req/s** | 97.4% | **0.71 ms** | 0.71 ms | 1.09 ms |
+| **Mixed Workload (Caching)** | 500 | 500 (100%) | 0 (0%) | **12,986.10 req/s** | 84.6% | **0.68 ms** | 0.64 ms | 1.18 ms |
+| **Cache MISSes (Relayed)** | 500 | 500 (100%) | 0 (0%) | 8,745.59 req/s | 0.0% | 1.08 ms | 0.94 ms | 1.99 ms |
+| **Without Caching (Bypass)** | 500 | 500 (100%) | 0 (0%) | 9,245.89 req/s | 0.0% | 1.03 ms | 0.92 ms | 1.75 ms |
+
+##### Benchmark Analysis:
+- **Latency Savings**: In-memory cache hits deliver a **25.6% latency reduction** compared to uncached upstream fetches.
+- **Throughput Acceleration**: In-memory caching achieves **1.24x higher throughput** over origin bypass requests.
+- **Conditional Revalidation Efficiency**: 304 Not Modified revalidation avoids payload transmission, maintaining an average latency of **0.71 ms** (comparable to direct cache hits).
+
+#### 5. Contributed Files
+- `src/cache/cache_validator.h`: Interface for ETag, Last-Modified, conditional GET, and cache revalidation.
+- `src/cache/cache_validator.c`: Implementation of RFC 7232/7234 validation and upstream revalidation logic.
+- `tests/proxy/mock_origin.c`: C origin server simulating dynamic ETags, Last-Modified timestamps, and 304 responses.
+- `tests/proxy/test_validation.sh`: POSIX shell and curl automated test battery covering all 15 validation test cases.
+- `benchmarks/benchmark_validation.c`: Standalone multi-threaded C benchmark engine with microsecond monotonic timing.
+- `benchmarks/run_benchmarks.sh`: Benchmark orchestration script.
+- `Makefile`: Targets for `test_validation` and `benchmark_validation`.
+

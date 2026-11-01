@@ -7,6 +7,7 @@
 #include "upstream.h"
 #include "../cache/lru_cache.h"
 #include "../cache/cache_policy.h"
+#include "../cache/cache_validator.h"
 #include "../server/server.h"
 #include "../server/http_parser.h"
 #include "../server/http_response.h"
@@ -242,52 +243,34 @@ static void process_proxy_client(int client_fd)
         /* 1. Check LRU Cache */
         cache_entry_t *cached = lru_cache_get(g_proxy_cache, canon_url);
 
-        if (cached && cache_entry_is_fresh(cached)) {
+        if (cached && !cache_entry_needs_revalidation(cached)) {
             /* Case 1: Fresh Cache HIT */
-            relay_cached_entry(client_fd, cached, "HIT", is_head, req.keep_alive);
+            if (cache_check_client_conditional(&req, cached)) {
+                send_proxy_304(client_fd, cached, "HIT", req.keep_alive);
+            } else {
+                relay_cached_entry(client_fd, cached, "HIT", is_head, req.keep_alive);
+            }
             cache_entry_free_copy(cached);
         } else if (cached) {
             /* Case 2: Stale Cache Entry -> Conditional Revalidation with origin */
-            int upstream_fd = upstream_connect(target.host, target.port, 5);
-            if (upstream_fd < 0) {
-                /* If upstream is unreachable, return 502 Bad Gateway */
+            upstream_response_t up_resp;
+            bool was_304 = false;
+
+            if (!cache_revalidate_with_upstream(g_proxy_cache, &target, &req, cached, &up_resp, &was_304)) {
                 send_proxy_error(client_fd, 502, "Bad Gateway", "Unable to connect to upstream server for revalidation.", false);
                 cache_entry_free_copy(cached);
                 break;
             }
 
-            if (!upstream_forward_request(upstream_fd, &target, &req, cached->etag, cached->last_modified)) {
-                close(upstream_fd);
-                send_proxy_error(client_fd, 502, "Bad Gateway", "Failed sending request to upstream.", false);
-                cache_entry_free_copy(cached);
-                break;
-            }
-
-            upstream_response_t up_resp;
-            if (!upstream_read_response(upstream_fd, &up_resp)) {
-                close(upstream_fd);
-                send_proxy_error(client_fd, 502, "Bad Gateway", "Failed reading response from upstream.", false);
-                cache_entry_free_copy(cached);
-                break;
-            }
-            close(upstream_fd);
-
-            if (up_resp.status_code == 304) {
-                /* 304 Not Modified: Cache revalidated! Update freshness metadata */
-                http_cache_control_t cc;
-                parse_cache_control(up_resp.cache_control, &cc);
-                lru_cache_update_revalidated(g_proxy_cache, canon_url, up_resp.etag, up_resp.last_modified, cc.max_age);
-                relay_cached_entry(client_fd, cached, "REVALIDATED", is_head, req.keep_alive);
-            } else {
-                /* Origin returned full response (e.g. 200 or 404) */
-                http_cache_control_t cc;
-                parse_cache_control(up_resp.cache_control, &cc);
-                if (is_response_cacheable(req.method, up_resp.status_code, &cc)) {
-                    lru_cache_put(g_proxy_cache, canon_url, up_resp.status_code,
-                                  up_resp.content_type, up_resp.body, up_resp.body_len,
-                                  up_resp.etag, up_resp.last_modified,
-                                  cc.max_age, cc.no_cache, cc.must_revalidate);
+            if (was_304) {
+                /* 304 Not Modified: Cache revalidated! Preserved cached body */
+                if (cache_check_client_conditional(&req, cached)) {
+                    send_proxy_304(client_fd, cached, "REVALIDATED", req.keep_alive);
+                } else {
+                    relay_cached_entry(client_fd, cached, "REVALIDATED", is_head, req.keep_alive);
                 }
+            } else {
+                /* Origin returned full response (e.g. 200 OK or 404) */
                 relay_upstream_response(client_fd, &up_resp, "MISS", is_head, req.keep_alive);
             }
 

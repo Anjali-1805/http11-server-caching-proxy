@@ -15,6 +15,7 @@ PROXY_SRCS = src/proxy/main.c \
              src/proxy/upstream.c \
              src/cache/lru_cache.c \
              src/cache/cache_policy.c \
+             src/cache/cache_validator.c \
              src/server/server.c \
              src/server/http_parser.c \
              src/server/http_response.c \
@@ -23,7 +24,7 @@ PROXY_SRCS = src/proxy/main.c \
 SERVER_OBJS = $(SERVER_SRCS:.c=.o)
 PROXY_OBJS  = $(PROXY_SRCS:.c=.o)
 
-.PHONY: all server http_server proxy caching_proxy clean test test_proxy benchmark
+.PHONY: all server http_server proxy caching_proxy clean test test_proxy benchmark test_validation benchmark_validation
 
 all: server http_server proxy caching_proxy
 
@@ -56,6 +57,12 @@ test_proxy: server proxy
 
 benchmark: server
 	python3 benchmarks/benchmark.py
+
+test_validation: proxy
+	./tests/proxy/test_validation.sh
+
+benchmark_validation: proxy
+	./benchmarks/run_benchmarks.sh
 
 clean:
 	rm -f server http_server proxy caching_proxy socket_learning src/server/*.o src/proxy/*.o src/cache/*.o *.o
