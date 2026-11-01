@@ -40,7 +40,7 @@ This project aims to implement an HTTP/1.1 server and a forward proxy with an LR
 
 ## Project Status
 - **HTTP Server**: Complete and verified (both Thread-Pool and Event-Loop concurrency models fully implemented and tested).
-- **Forward Proxy and Cache**: Assigned to Sipra; in progress on `feature/proxy-cache`.
+- **Forward Proxy and Cache**: Complete and verified (LRU caching, Cache-Control handling, conditional revalidation, and multithreading implemented and tested on `feature/proxy-cache`).
 
 ## AI Use
 AI assistance is documented in `AI-USE.md` in accordance with the assignment rules.
@@ -265,3 +265,166 @@ python3 benchmarks/benchmark.py
 | **P99 Latency** | **40.87 ms** | 124.98 ms |
 
 *Analysis*: The Thread-Pool server achieves approximately $3.4\times$ higher throughput on multi-core hardware due to parallel blocking I/O across worker threads, while the Event-Loop server maintains a minimal memory footprint and zero thread synchronization overhead.
+
+
+---
+
+### Sipra & Akshat — Forward Proxy and Cache Implementation
+
+#### 1. Features Implemented
+
+- **Upstream TCP Relay & Request Rewriting**:
+  - Raw POSIX socket connections to upstream origin servers using `socket()` and `connect()`.
+  - DNS resolution and IP address lookup via `getaddrinfo()`.
+  - Absolute-form URI parser (`http://host:port/path`) extracting host, port (default 80), and path.
+  - Origin-form URI fallback with mandatory `Host: <host>:<port>` header support.
+  - Stripping of hop-by-hop headers (`Proxy-Connection`, `Connection`, `Keep-Alive`, `Upgrade`).
+  - Insertion of proxy identification headers: `Via: 1.1 caching-proxy`.
+  - Unreachable origin failure handling: returns `502 Bad Gateway` HTML error page.
+- **Thread-Safe LRU Cache Engine**:
+  - $O(1)$ lookup via a 1024-bucket hash table with djb2 hashing algorithm.
+  - $O(1)$ eviction order via doubly linked list tracking Most Recently Used (head) to Least Recently Used (tail).
+  - Memory-bounded eviction: user-configurable maximum byte capacity (`--cache-size <MB>`).
+  - Entry-bounded eviction: user-configurable maximum entry count (`--max-entries <count>`).
+  - Isolated copy generation: readers receive a detached snapshot of the cache entry so client transmissions never hold the cache mutex lock.
+  - Thread safety: all cache operations synchronized with `pthread_mutex_t`.
+  - Performance counters tracking hits, misses, evictions, and revalidations.
+- **HTTP/1.1 Cache-Control & Freshness Evaluation**:
+  - `Cache-Control` directive parsing: `no-store`, `no-cache`, `private`, `public`, `max-age=N`, `must-revalidate`.
+  - Cache eligibility enforcement: only `GET` and `HEAD` responses with status `200 OK` can be cached.
+  - Privacy defense: responses with `Cache-Control: private` or `no-store` are never stored.
+  - Freshness lifetime calculation: checks elapsed age against `max-age=N` (or default 60s).
+  - Diagnostic response headers: `X-Cache: HIT`, `X-Cache: MISS`, `X-Cache: REVALIDATED`, and `Age: <seconds>`.
+- **Conditional GET & Cache Revalidation**:
+  - Detects stale cache entries or entries marked `no-cache`.
+  - Injects `If-None-Match: <etag>` when ETag validator is available.
+  - Injects `If-Modified-Since: <date>` when Last-Modified validator is available.
+  - Handles `304 Not Modified` responses: refreshes cache metadata (`cached_at`, `max_age`) and serves the cached body with `X-Cache: REVALIDATED` without re-transmitting payload over the network.
+  - Handles `200 OK` responses: updates cache with fresh response headers and body.
+- **Multithreaded Proxy Concurrency**:
+  - Worker thread pool with synchronized FIFO task queue (`pthread_mutex_t`, `pthread_cond_t`).
+  - Configurable worker thread count (`--threads <num>`).
+  - Socket read/write timeouts (`SO_RCVTIMEO`, `SO_SNDTIMEO`) preventing hanging connections.
+  - Graceful shutdown on `SIGINT` and `SIGTERM` cleanly terminating worker threads and freeing cache memory.
+
+---
+
+#### 2. Forward Proxy Architecture
+
+```
+Client Request
+      |
+      v
++-------------------------------+
+|  Proxy Listener Socket        |
+|  (port 8081, accept loop)     |
++---------------+---------------+
+                |
+                v
++-------------------------------+
+|  Synchronized Task Queue      |
++---------------+---------------+
+                |
+                v
++-------------------------------+
+|  Worker Thread Pool           |
++---------------+---------------+
+                |
+                v
++-------------------------------+
+|  Parse Request URI & Target   |
++---------------+---------------+
+                |
+                v
++-------------------------------+
+|  LRU Cache Lookup (Hash Table)|
++-------+---------------+-------+
+        |               |
+[Fresh HIT]         [MISS]
+        |               |
+        |       +-------v-----------------------+
+        |       | Connect to Upstream Origin    |
+        |       | Forward Request (Via, Host)   |
+        |       +-------+-----------------------+
+        |               |
+        |       +-------v-----------------------+
+        |       | Read Upstream Response        |
+        |       | If cacheable, store in LRU    |
+        |       +-------+-----------------------+
+        |               |
+        v               v
++-------------------------------+
+| Relay Response to Client      |
+| (X-Cache: HIT / MISS, Via)    |
++-------------------------------+
+```
+
+---
+
+#### 3. Compilation Instructions
+
+```bash
+# Build both HTTP server and Forward Proxy executables
+make
+
+# Build only the proxy
+make proxy
+```
+
+The build produces both `./proxy` and `./caching_proxy`.
+
+---
+
+#### 4. Execution Commands
+
+```bash
+# Run Forward Proxy on port 8081 with 10 MB cache and 8 worker threads
+./proxy --port 8081 --cache-size 10 --threads 8
+
+# Display CLI options
+./proxy --help
+```
+
+---
+
+#### 5. Testing Instructions
+
+```bash
+# Run automated proxy test suite (spawns origin server and proxy)
+make test_proxy
+# OR directly
+python3 tests/proxy/test_proxy.py
+```
+
+##### Automated Test Coverage:
+1. Absolute-form URI forwarding (`GET http://127.0.0.1:18080/index.html`).
+2. Response relay verification (headers, Content-Type, Content-Length, body byte accuracy).
+3. Unreachable origin failure handling (`502 Bad Gateway`).
+4. Cache MISS on initial request followed by Cache HIT on repeat request (`X-Cache: HIT`, `Age` header).
+5. HEAD request forwarding through proxy (headers relayed with zero body bytes).
+6. Origin-form URI with `Host` header resolution.
+7. Unsupported method validation (`POST` returns `405 Method Not Allowed`).
+8. Malformed request syntax rejected (`400 Bad Request`).
+9. Concurrent client requests under multi-threaded load.
+
+---
+
+#### 6. Performance Benchmarking
+
+```bash
+python3 benchmarks/benchmark_proxy.py
+```
+
+##### Measured Benchmark Results:
+
+- **Environment**: Ubuntu 24.04 (WSL 2) on Windows, GCC 13.3.0.
+- **Workload**: 500 requests under 20 concurrent workers.
+
+| Metric | Cache HIT (In-Memory) | Cache MISS (Upstream Relay) |
+| :--- | :--- | :--- |
+| **Total Requests** | 500 | 500 |
+| **Successful Requests (200 OK)** | 500 (100%) | 500 (100%) |
+| **Requests Per Second (RPS)** | **1,068.38 req/sec** | 1,115.35 req/sec |
+| **Average Latency** | **17.53 ms** | 17.14 ms |
+| **P50 Latency** | **17.10 ms** | 16.85 ms |
+| **P95 Latency** | **26.89 ms** | 23.71 ms |
