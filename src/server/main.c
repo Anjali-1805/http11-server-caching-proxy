@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <getopt.h>
+#include "../proxy.h"
 
 static void handle_signal(int sig)
 {
