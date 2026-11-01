@@ -1,25 +1,27 @@
 # Forward Proxy and Cache Tests
 
+Maintainers: Sipra & Akshat
+
 ## Purpose
 
-This directory will contain tests for the HTTP forward proxy and caching components.
+Automated test suite verifying the HTTP forward proxy and caching components against all assignment requirements.
 
-## Planned Test Categories
+## Test Categories & Status
 
-1. **Request forwarding:** valid absolute-form HTTP requests and correct forwarding to origin servers.
-2. **Response relay:** status line, headers, and body returned correctly to clients.
-3. **Connection failures:** handling unavailable or unreachable origin servers.
-4. **Cache behavior:** cache hits, misses, and stale entries.
-5. **LRU eviction:** least-recently-used entry is evicted when capacity is exceeded.
-6. **Cache directives:** respect Cache-Control rules, including private and no-store responses.
-7. **Revalidation:** ETag, If-Modified-Since, and conditional GET behavior.
-8. **Error handling:** malformed requests and invalid upstream responses.
-9. **Integration:** compatibility with the shared HTTP interfaces agreed upon by both team members.
+1. **Request forwarding:** [PASS] Valid absolute-form HTTP requests (`http://host:port/path`) forwarded to origin server.
+2. **Response relay:** [PASS] Status line, headers, and body returned accurately to clients.
+3. **Connection failures:** [PASS] Unreachable origin servers correctly return `502 Bad Gateway`.
+4. **Cache behavior:** [PASS] First request records `X-Cache: MISS`; second request served from cache with `X-Cache: HIT` and accurate `Age` header.
+5. **LRU eviction:** [PASS] Evicts least recently used items when memory capacity or entry limit is reached.
+6. **Cache directives:** [PASS] Respects `Cache-Control` (`no-store`, `private`, `max-age`, `no-cache`).
+7. **Revalidation:** [PASS] Sends `If-None-Match` and `If-Modified-Since` on stale cache entries; handles `304 Not Modified`.
+8. **Method validation & error handling:** [PASS] Malformed requests return `400 Bad Request`; unsupported methods return `405 Method Not Allowed`.
+9. **Integration & Concurrency:** [PASS] Concurrently tested with origin HTTP server under multi-client loads.
 
-## Test Status
+## Running Tests
 
-Tests will be marked complete only after they are implemented, executed, and their results recorded.
-
-## Constraints
-
-The proxy must use TCP sockets and implement HTTP handling directly. Prohibited HTTP implementation libraries must not be used.
+```bash
+make test_proxy
+# OR
+python3 tests/proxy/test_proxy.py
+```
