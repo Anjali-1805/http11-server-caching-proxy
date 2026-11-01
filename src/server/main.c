@@ -1,8 +1,3 @@
-/**
- * @file main.c
- * @brief HTTP/1.1 Server entry point with CLI options and signal handling.
- */
-
 #include "server.h"
 #include "file_handler.h"
 #include "thread_pool.h"
@@ -37,12 +32,15 @@ static void print_usage(const char *prog_name)
 
 int main(int argc, char *argv[])
 {
+    
     server_config_t config;
     config.port = 8080;
     strncpy(config.doc_root, "./www", sizeof(config.doc_root) - 1);
     config.mode = SERVER_MODE_THREADPOOL;
     config.num_threads = 8;
     config.backlog = 128;
+    int proxy_port = -1;
+    size_t cache_capacity = 100;
 
     static struct option long_options[] = {
         {"port",    required_argument, 0, 'p'},
@@ -50,7 +48,12 @@ int main(int argc, char *argv[])
         {"mode",    required_argument, 0, 'm'},
         {"threads", required_argument, 0, 't'},
         {"help",    no_argument,       0, 'h'},
-        {0, 0, 0, 0}
+        if (strcmp(argv[i], "--proxy-port") == 0 && i + 1 < argc) {
+            proxy_port = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--cache-size") == 0 && i + 1 < argc) {
+            cache_capacity = (size_t)atoi(argv[++i]);
+        }
+    {0, 0, 0, 0}
     };
 
     int opt = 0;
@@ -64,6 +67,12 @@ int main(int argc, char *argv[])
                     return 1;
                 }
                 break;
+            case 1001:
+			proxy_port = atoi(optarg);
+			break;
+		    case 1002:
+			cache_capacity = (size_t)atoi(optarg);
+			break;
             case 'r':
                 strncpy(config.doc_root, optarg, sizeof(config.doc_root) - 1);
                 config.doc_root[sizeof(config.doc_root) - 1] = '\0';
@@ -94,31 +103,24 @@ int main(int argc, char *argv[])
         }
     }
 
-    /* Set up signal handlers for graceful shutdown */
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handle_signal;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
-
-    /* Ignore SIGPIPE so broken client pipes don't kill server */
     signal(SIGPIPE, SIG_IGN);
 
-    /* Initialize document root and verify path */
     if (!file_handler_init(config.doc_root)) {
         fprintf(stderr, "Error: Failed to initialize document root: %s\n", config.doc_root);
         return 1;
     }
-
-    /* Bind and listen on TCP socket */
     int listen_fd = create_and_bind_socket(config.port, config.backlog);
     if (listen_fd < 0) {
         fprintf(stderr, "Error: Failed to bind to port %d\n", config.port);
         return 1;
     }
 
-    /* Print startup information */
     printf("=====================================================\n");
     printf("       HTTP/1.1 Server (Anjali's Implementation)      \n");
     printf("=====================================================\n");
